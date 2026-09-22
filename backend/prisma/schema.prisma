@@ -1,0 +1,449 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// IDENTITY, TENANCY, RBAC
+// ─────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships    Membership[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  countryCode String @default("AU") // ISO 3166-1 alpha-2; drives CountryAccountingProvider selection
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  companies   Company[]
+  roles       Role[]
+  contacts    Contact[]
+  accounts    Account[]
+  journalEntries JournalEntry[]
+  invoices    Invoice[]
+  bills       Bill[]
+  bankAccounts BankAccount[]
+  bankTransactions BankTransaction[]
+  payments    Payment[]
+  auditLogs   AuditLog[]
+
+  @@map("organizations")
+}
+
+model Company {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  registrationId String?  // ABN / EIN / VAT number etc. Label comes from CountryAccountingProvider.
+  baseCurrency   String   @default("AUD")
+  address        String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("companies")
+}
+
+model Role {
+  id             String   @id @default(uuid())
+  organizationId String?  // null = system-defined global role (Owner, Accountant, etc.)
+  name           String
+  isSystem       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization      Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships       Membership[]
+  rolePermissions   RolePermission[]
+
+  @@unique([organizationId, name])
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(uuid())
+  key         String @unique // e.g. "invoice.create", "bank.reconcile"
+  description String
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Membership {
+  id             String   @id @default(uuid())
+  userId         String
+  organizationId String
+  roleId         String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CHART OF ACCOUNTS + LEDGER (double-entry core)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  COST_OF_GOODS_SOLD
+  EXPENSE
+}
+
+model Account {
+  id             String      @id @default(uuid())
+  organizationId String
+  code           String      // e.g. "1-1000"
+  name           String
+  type           AccountType
+  parentId       String?
+  isSystem       Boolean     @default(false)
+  isArchived     Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Account?     @relation("AccountToParent", fields: [parentId], references: [id])
+  children     Account[]    @relation("AccountToParent")
+  journalLines JournalLine[]
+  bankAccounts BankAccount[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("accounts")
+}
+
+enum JournalEntryStatus {
+  POSTED
+  REVERSED
+}
+
+model JournalEntry {
+  id             String             @id @default(uuid())
+  organizationId String
+  companyId      String?
+  entryDate      DateTime
+  description    String
+  sourceType     String             // "INVOICE" | "PAYMENT" | "BILL" | "MANUAL" | "REVERSAL" ...
+  sourceId       String?            // id of the invoice/payment/bill that generated this entry
+  status         JournalEntryStatus @default(POSTED)
+  reversesEntryId String?           // set when this entry reverses another
+  createdAt      DateTime           @default(now())
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lines        JournalLine[]
+  reversesEntry JournalEntry? @relation("ReversalOf", fields: [reversesEntryId], references: [id])
+  reversedBy    JournalEntry[] @relation("ReversalOf")
+
+  @@index([organizationId, entryDate])
+  @@index([sourceType, sourceId])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id             String   @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  debit          Decimal  @default(0) @db.Decimal(20, 8)
+  credit         Decimal  @default(0) @db.Decimal(20, 8)
+  memo           String?
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_lines")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CONTACTS
+// ─────────────────────────────────────────────────────────────────────────
+
+enum ContactType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+model Contact {
+  id             String      @id @default(uuid())
+  organizationId String
+  type           ContactType
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  taxId          String?     // ABN / VAT / EIN depending on country
+  currency       String      @default("AUD")
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoices     Invoice[]
+  bills        Bill[]
+
+  @@index([organizationId])
+  @@map("contacts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// INVOICES (sales)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  organizationId String
+  contactId      String
+  invoiceNumber  String
+  issueDate      DateTime
+  dueDate        DateTime
+  currency       String        @default("AUD")
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @db.Decimal(20, 8)
+  taxTotal       Decimal       @db.Decimal(20, 8)
+  total          Decimal       @db.Decimal(20, 8)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact       @relation(fields: [contactId], references: [id])
+  lines        InvoiceLine[]
+  payments     Payment[]
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @db.Decimal(20, 8)
+  unitPrice   Decimal @db.Decimal(20, 8)
+  taxRate     Decimal @db.Decimal(5, 4) // e.g. 0.10 for 10% GST
+  lineTotal   Decimal @db.Decimal(20, 8)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BILLS (purchases) — [planned: Phase 2 service layer; schema included now]
+// ─────────────────────────────────────────────────────────────────────────
+
+enum BillStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_PAID
+  PAID
+}
+
+model Bill {
+  id             String     @id @default(uuid())
+  organizationId String
+  contactId      String
+  billNumber     String
+  issueDate      DateTime
+  dueDate        DateTime
+  currency       String     @default("AUD")
+  status         BillStatus @default(DRAFT)
+  subtotal       Decimal    @db.Decimal(20, 8)
+  taxTotal       Decimal    @db.Decimal(20, 8)
+  total          Decimal    @db.Decimal(20, 8)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id])
+  lines        BillLine[]
+  payments     Payment[]
+
+  @@unique([organizationId, billNumber])
+  @@map("bills")
+}
+
+model BillLine {
+  id          String  @id @default(uuid())
+  billId      String
+  description String
+  quantity    Decimal @db.Decimal(20, 8)
+  unitPrice   Decimal @db.Decimal(20, 8)
+  taxRate     Decimal @db.Decimal(5, 4)
+  lineTotal   Decimal @db.Decimal(20, 8)
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+  @@map("bill_lines")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BANKING & RECONCILIATION
+// ─────────────────────────────────────────────────────────────────────────
+
+enum BankTransactionStatus {
+  UNMATCHED
+  MATCHED
+  RECONCILED
+}
+
+model BankAccount {
+  id             String   @id @default(uuid())
+  organizationId String
+  glAccountId    String
+  name           String
+  currency       String   @default("AUD")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  glAccount    Account           @relation(fields: [glAccountId], references: [id])
+  transactions BankTransaction[]
+
+  @@index([organizationId])
+  @@map("bank_accounts")
+}
+
+model BankTransaction {
+  id                     String                 @id @default(uuid())
+  organizationId         String
+  bankAccountId          String
+  txnDate                DateTime
+  description            String
+  amount                 Decimal                @db.Decimal(20, 8)
+  status                 BankTransactionStatus  @default(UNMATCHED)
+  matchedInvoiceId       String?
+  matchedBillId          String?
+  journalEntryId         String?
+  categorizedAccountId   String?
+  createdAt              DateTime               @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bankAccount  BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("bank_transactions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PAYMENTS (partial payment support)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Payment {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  invoiceId          String?
+  billId             String?
+  amount             Decimal  @db.Decimal(20, 8)
+  paymentDate        DateTime
+  bankTransactionId  String?
+  journalEntryId     String?
+  createdAt          DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id])
+  bill         Bill?        @relation(fields: [billId], references: [id])
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@index([billId])
+  @@map("payments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String   // e.g. "invoice.create", "auth.login"
+  entityType     String?
+  entityId       String?
+  oldValue       Json?
+  newValue       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
