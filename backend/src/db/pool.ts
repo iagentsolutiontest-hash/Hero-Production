@@ -1,4 +1,4 @@
-import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { getTenantStore } from './tenant-context';
 
 let pool: Pool | null = null;
@@ -7,7 +7,7 @@ let patched = false;
 async function applyTenantGucs(client: PoolClient): Promise<void> {
   const store = getTenantStore();
 
-  // Set all tenant GUCs in ONE database round trip.
+  // One round trip instead of three.
   await client.query(
     `
       SELECT
@@ -25,17 +25,15 @@ async function applyTenantGucs(client: PoolClient): Promise<void> {
 
 async function clearTenantGucs(client: PoolClient): Promise<void> {
   try {
-    // Reset all tenant GUCs in ONE database round trip.
-    await client.query(
-      `
-        SELECT
-          set_config('app.bypass_rls', 'off', false),
-          set_config('app.current_user_id', '', false),
-          set_config('app.current_organization_id', '', false)
-      `,
-    );
+    // One round trip instead of three.
+    await client.query(`
+      SELECT
+        set_config('app.bypass_rls', 'off', false),
+        set_config('app.current_user_id', '', false),
+        set_config('app.current_organization_id', '', false)
+    `);
   } catch {
-    // Connection may already be broken.
+    // Ignore errors if the connection is already broken.
   }
 }
 
@@ -109,7 +107,7 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString,
 
-      // Railway production settings
+      // Railway production connection pool.
       max: Number(process.env.DB_POOL_MAX || 10),
       min: Number(process.env.DB_POOL_MIN || 2),
 
@@ -123,7 +121,6 @@ export function getPool(): Pool {
 
       keepAlive: true,
 
-      // Helpful for Railway/PostgreSQL connections
       maxLifetimeSeconds: Number(
         process.env.DB_MAX_LIFETIME_SECONDS || 300,
       ),
@@ -148,7 +145,7 @@ export async function closePool(): Promise<void> {
 }
 
 /**
- * Run function with RLS bypass.
+ * Execute code with RLS bypass enabled.
  */
 export async function withRlsBypass<T>(
   fn: () => Promise<T>,
