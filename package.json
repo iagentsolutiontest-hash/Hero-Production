@@ -16,7 +16,7 @@
     "migrate": "ts-node --transpile-only src/db/migrate.ts",
     "seed": "ts-node --transpile-only src/db/seed/systemRolesAndPermissions.ts",
     "test": "jest --config jest.config.js",
-    "start:prod": "node dist/main.js"
+    "start:prod": "node dist/src/main.js"
   },
 
   "keywords": [],
