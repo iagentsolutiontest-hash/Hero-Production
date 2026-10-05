@@ -5,12 +5,14 @@ The NestJS API is intended to run as a persistent Node.js service (Railway, Rend
 ## Build
 
 ```bash
-npm ci
+NODE_ENV=development npm ci --no-audit --no-fund
 npm run build
 npm run migrate
 npm run seed
-npm run start:prod
+NODE_ENV=production npm run start:prod
 ```
+
+Keep `NODE_ENV=production` only for the runtime start command. Installing with `NODE_ENV=production` in hosted build environments can trigger npm cache-locking issues and production-only dependency pruning during the build phase.
 
 Run migrations and seed only against the intended production database and after reviewing the migration/seed behavior.
 
