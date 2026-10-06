@@ -59,7 +59,3 @@
     "ts-node": "^10.9.2"
   }
 }
-
-Also, **don't manually delete `node_modules` and commit it**. It should remain in `.gitignore`.
-
-If Railway still gives `EBUSY` after this, the next thing I would change is the **Railway build configuration itself**, rather than your NestJS code.
