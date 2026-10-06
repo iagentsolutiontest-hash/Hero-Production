@@ -53,7 +53,7 @@ async function bootstrap() {
   );
 
   const port = process.env.PORT || 3000;
-  await app.listen(Number(process.env.PORT) || 3000, '0.0.0.0');
+  await app.listen(port);
   // eslint-disable-next-line no-console
   console.log(`Hero API listening on port ${port}`);
 }

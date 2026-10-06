@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { getPool, withRlsBypass } from '../../db/pool';
 
 export interface ResolvedMembership {
@@ -51,6 +51,13 @@ export class MembershipService {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        const existing = await client.query(
+          `SELECT 1 FROM memberships WHERE user_id = $1 AND is_active = TRUE LIMIT 1`,
+          [userId],
+        );
+        if (existing.rows.length) {
+          throw new ConflictException('This user already has an active company. One active company per user is supported.');
+        }
         const orgResult = await client.query(
           `INSERT INTO organizations (name, country_code, subscription_status, trial_started_at, trial_ends_at)
            VALUES ($1, $2, 'trialing', now(), now() + INTERVAL '3 days') RETURNING id`,
@@ -70,6 +77,12 @@ export class MembershipService {
         await client.query(
           `INSERT INTO memberships (user_id, organization_id, role_id) VALUES ($1, $2, $3)`,
           [userId, organizationId, ownerRole.rows[0].id],
+        );
+
+        await client.query(
+          `INSERT INTO notifications (organization_id, user_id, title, message, type)
+           VALUES ($1, $2, 'Welcome to Hero Accounting', 'Your company is ready. Your 3-day trial has started.', 'INFO')`,
+          [organizationId, userId],
         );
 
         await client.query('COMMIT');

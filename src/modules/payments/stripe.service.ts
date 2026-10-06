@@ -44,6 +44,11 @@ export class StripeService {
     return Boolean(process.env.STRIPE_SECRET_KEY);
   }
 
+  /** Used by the billing module for Stripe Billing Portal/payment methods. */
+  getStripeForBilling() {
+    return this.getStripe();
+  }
+
   async createSubscriptionCheckoutSession(
     organizationId: string,
     successUrl: string,
@@ -51,7 +56,14 @@ export class StripeService {
   ): Promise<{ sessionId: string; url: string | null }> {
     const stripe = this.getStripe();
     const priceId = process.env.STRIPE_PRICE_ID;
-    if (!priceId) throw new BadRequestException('Stripe subscription price is not configured. Set STRIPE_PRICE_ID.');
+    if (!priceId) throw new BadRequestException('Stripe subscription price is not configured. Set STRIPE_PRICE_ID to the $50/month recurring price.');
+
+    const configuredAmount = Math.round(Number(process.env.SUBSCRIPTION_PRICE || '50') * 100);
+    const configuredCurrency = String(process.env.SUBSCRIPTION_CURRENCY || 'USD').toLowerCase();
+    const stripePrice = await stripe.prices.retrieve(priceId);
+    if (stripePrice.type !== 'recurring' || stripePrice.unit_amount !== configuredAmount || stripePrice.currency !== configuredCurrency) {
+      throw new BadRequestException(`Stripe price is not configured for ${process.env.SUBSCRIPTION_CURRENCY || 'USD'} ${process.env.SUBSCRIPTION_PRICE || '50'}/month. Update STRIPE_PRICE_ID.`);
+    }
 
     const pool = getPool();
     const result = await pool.query(

@@ -16,7 +16,7 @@ export interface BillingStatus {
 
 @Injectable()
 export class BillingService {
-  private readonly price = Number(process.env.SUBSCRIPTION_PRICE || '15');
+  private readonly price = Number(process.env.SUBSCRIPTION_PRICE || '50');
   private readonly currency = (process.env.SUBSCRIPTION_CURRENCY || 'USD').toUpperCase();
 
   constructor(private readonly stripeService: StripeService) {}
@@ -74,6 +74,44 @@ export class BillingService {
     const trialActive = status === 'trialing' && row.trial_ends_at && new Date(row.trial_ends_at).getTime() > Date.now();
     if (status === 'active' || trialActive) return;
     if (status === 'past_due') throw new HttpException('Your Hero Accounting subscription needs payment attention.', HttpStatus.PAYMENT_REQUIRED);
-    throw new HttpException('Your 3-day Hero Accounting trial has ended. Please activate your $15/month subscription to continue.', HttpStatus.PAYMENT_REQUIRED);
+    throw new HttpException(`Your 3-day Hero Accounting trial has ended. Please activate your ${this.currency} ${this.price}/month subscription to continue.`, HttpStatus.PAYMENT_REQUIRED);
   }
+
+  async createPortalSession(userId: string, organizationId: string, returnUrl: string): Promise<{ url: string }> {
+    if (!returnUrl) throw new BadRequestException('returnUrl is required');
+    await this.getStatus(userId, organizationId);
+    const pool = getPool();
+    const result = await pool.query(
+      `SELECT stripe_customer_id FROM organizations WHERE id = $1 AND is_active = TRUE`,
+      [organizationId],
+    );
+    const customerId = result.rows[0]?.stripe_customer_id;
+    if (!customerId) {
+      throw new BadRequestException('No payment method is connected yet. Start checkout to add one.');
+    }
+    const stripe = this.stripeService.getStripeForBilling();
+    const portal = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
+    return { url: portal.url };
+  }
+
+  async listPaymentMethods(userId: string, organizationId: string) {
+    await this.getStatus(userId, organizationId);
+    const pool = getPool();
+    const result = await pool.query(
+      `SELECT stripe_customer_id FROM organizations WHERE id = $1 AND is_active = TRUE`,
+      [organizationId],
+    );
+    const customerId = result.rows[0]?.stripe_customer_id;
+    if (!customerId) return [];
+    const stripe = this.stripeService.getStripeForBilling();
+    const methods = await stripe.paymentMethods.list({ customer: customerId, type: 'card' });
+    return methods.data.map((m: any) => ({
+      id: m.id,
+      brand: m.card?.brand || 'card',
+      last4: m.card?.last4 || '',
+      expMonth: m.card?.exp_month || null,
+      expYear: m.card?.exp_year || null,
+    }));
+  }
+
 }

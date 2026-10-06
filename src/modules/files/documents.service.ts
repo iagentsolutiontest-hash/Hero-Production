@@ -42,12 +42,10 @@ export class DocumentsService {
     const storageKey = `${organizationId}/${safeName}`;
 
     if (this.supabaseConfigured) {
-      const body = new ArrayBuffer(file.buffer.byteLength);
-      new Uint8Array(body).set(file.buffer);
       const response = await fetch(`${this.supabaseBase}/${encodeURIComponent(String(process.env.SUPABASE_STORAGE_BUCKET))}/${storageKey.split('/').map(encodeURIComponent).join('/')}`, {
         method: 'POST',
         headers: { ...this.supabaseHeaders, 'Content-Type': file.mimetype, 'x-upsert': 'false' },
-        body,
+        body: new Uint8Array(file.buffer),
       });
       if (!response.ok) throw new Error(`Document storage upload failed (${response.status})`);
     } else {

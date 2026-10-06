@@ -38,6 +38,7 @@ import { BillingController } from './modules/billing/billing.controller';
 import { BillingService } from './modules/billing/billing.service';
 import { DocumentsController } from './modules/files/documents.controller';
 import { DocumentsService } from './modules/files/documents.service';
+import { NotificationsController } from './modules/notifications/notifications.controller';
 
 @Module({
   controllers: [
@@ -59,6 +60,7 @@ import { DocumentsService } from './modules/files/documents.service';
     AiController,
     BillingController,
     DocumentsController,
+    NotificationsController,
   ],
   providers: [
     AuthService,

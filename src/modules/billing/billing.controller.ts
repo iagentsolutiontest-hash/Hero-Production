@@ -19,6 +19,22 @@ export class BillingController {
     return { success: true, data: await this.billingService.getStatus(req.userId, organizationId) };
   }
 
+  @Post('portal')
+  async portal(
+    @Req() req: { userId: string },
+    @Headers('x-organization-id') organizationId: string | undefined,
+    @Body() body: { returnUrl?: string },
+  ) {
+    if (!organizationId) throw new BadRequestException('Missing x-organization-id header');
+    return { success: true, data: await this.billingService.createPortalSession(req.userId, organizationId, body?.returnUrl || '') };
+  }
+
+  @Get('payment-methods')
+  async paymentMethods(@Req() req: { userId: string }, @Headers('x-organization-id') organizationId?: string) {
+    if (!organizationId) throw new BadRequestException('Missing x-organization-id header');
+    return { success: true, data: await this.billingService.listPaymentMethods(req.userId, organizationId) };
+  }
+
   @Post('checkout')
   async checkout(
     @Req() req: { userId: string },

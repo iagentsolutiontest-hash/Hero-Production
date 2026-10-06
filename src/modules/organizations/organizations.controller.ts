@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Req, UseGuards, BadRequestException } from '@nestjs/common';
 import { IsString, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MembershipService } from '../tenancy/membership.service';
 import { ChartOfAccountsService } from '../ledger/chart-of-accounts.service';
 import { getPool, withRlsBypass } from '../../db/pool';
+import { PermissionsGuard } from '../rbac/permissions.guard';
+import { RequirePermission } from '../rbac/require-permission.decorator';
 
 class CreateOrganizationDto {
   @IsString()
@@ -36,6 +38,22 @@ export class OrganizationsController {
       await this.chartOfAccountsService.bootstrapStandardAccounts(organizationId);
     });
     return { success: true, data: { organizationId, trialDays: 3 } };
+  }
+
+  @Patch('current')
+  @UseGuards(PermissionsGuard)
+  @RequirePermission('org.manage')
+  async updateCurrent(@Req() req: any, @Body() dto: CreateOrganizationDto) {
+    const countryCode = String(dto.countryCode || '').trim().toUpperCase();
+    if (!countryCode) throw new BadRequestException('Country is required');
+    const pool = getPool();
+    const result = await pool.query(
+      `UPDATE organizations SET name = COALESCE(NULLIF($1, ''), name), country_code = $2, updated_at = now()
+       WHERE id = $3 AND is_active = TRUE RETURNING id, name, country_code`,
+      [dto.name?.trim() || '', countryCode, req.membership.organizationId],
+    );
+    if (!result.rows.length) throw new BadRequestException('Organization not found');
+    return { success: true, data: result.rows[0] };
   }
 
   @Get('mine')

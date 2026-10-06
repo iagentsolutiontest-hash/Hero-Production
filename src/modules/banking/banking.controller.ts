@@ -7,6 +7,7 @@ import { RequirePermission } from '../rbac/require-permission.decorator';
 import { BankAccountService } from './bank-account.service';
 import { ReconciliationService } from './reconciliation.service';
 import { parseBankCsv, parseBankOfx } from './csv-import.util';
+import { CountryProviderRegistry } from '../country/country-provider.registry';
 
 class CreateBankAccountDto {
   @IsString()
@@ -65,15 +66,19 @@ export class BankAccountsController {
   constructor(
     private bankAccountService: BankAccountService,
     private reconciliationService: ReconciliationService,
+    private countryRegistry: CountryProviderRegistry,
   ) {}
 
   @Post()
   @RequirePermission('bank.import')
   async create(@Req() req: any, @Body() dto: CreateBankAccountDto) {
+    const pool = (await import('../../db/pool')).getPool();
+    const org = await pool.query(`SELECT country_code FROM organizations WHERE id = $1`, [req.membership.organizationId]);
+    const defaultCurrency = this.countryRegistry.get(org.rows[0]?.country_code || 'AU').defaultCurrency;
     const account = await this.bankAccountService.create(
       req.membership.organizationId,
       dto.name,
-      dto.currency,
+      dto.currency || defaultCurrency,
     );
     return { success: true, data: account };
   }

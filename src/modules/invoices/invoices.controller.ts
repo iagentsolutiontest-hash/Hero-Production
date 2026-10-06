@@ -71,7 +71,7 @@ export class InvoicesController {
       contactId: dto.contactId,
       issueDate: new Date(dto.issueDate),
       dueDate: new Date(dto.dueDate),
-      currency: dto.currency ?? 'AUD',
+      currency: dto.currency ?? '',
       lines: dto.lines,
       notes: dto.notes,
     });

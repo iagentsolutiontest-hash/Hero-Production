@@ -7,7 +7,7 @@ export class BankAccountService {
    * it (code auto-incremented under the 1-10xx range), so multiple bank
    * accounts don't all collapse onto the single default '1-1000' account
    * bootstrapped by ChartOfAccountsService. */
-  async create(organizationId: string, name: string, currency = 'AUD') {
+  async create(organizationId: string, name: string, currency: string) {
     const pool = getPool();
     const client = await pool.connect();
     try {
