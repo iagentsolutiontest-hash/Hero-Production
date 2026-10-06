@@ -1,8 +1,13 @@
 [phases.install]
-cmds = ["rm -rf node_modules/.cache || true", "npm ci --include=dev"]
+cmds = [
+  "rm -rf node_modules",
+  "npm ci --include=dev"
+]
 
 [phases.build]
-cmds = ["npm run build"]
+cmds = [
+  "npm run build"
+]
 
 [start]
 cmd = "npm run start"
