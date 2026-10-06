@@ -15,7 +15,9 @@
     "seed": "ts-node --transpile-only src/db/seed/systemRolesAndPermissions.ts",
     "test": "jest --config jest.config.js",
     "start:prod": "node dist/main.js"
+    
   },
+  
   "keywords": [],
   "author": "",
   "license": "ISC",
