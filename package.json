@@ -60,65 +60,6 @@
     "ts-node": "^10.9.2"
   }
 }
-```
-
-**Correction:** don't use that version as-is — it contains duplicate entries. Your original `package.json` is actually already fine. **You do not need to edit `package.json` for the EBUSY problem.**
-
-Instead, keep your original `package.json` exactly as you posted and create this new file:
-
-### `nixpacks.toml`
-
-```toml
-[phases.install]
-cmds = [
-  "rm -rf node_modules/.cache || true",
-  "npm ci --include=dev"
-]
-
-[phases.build]
-cmds = [
-  "npm run build"
-]
-
-[start]
-cmd = "npm run start"
-```
-
-### Your final backend should be
-
-```text
-hero-backend/
-├── src/
-├── package.json
-├── package-lock.json
-├── tsconfig.json
-├── nixpacks.toml       ← NEW
-└── ...
-```
-
-Then:
-
-```bash
-git add package.json nixpacks.toml
-git commit -m "Fix Railway build"
-git push
-```
-
-**Important:** Since your Railway logs previously showed:
-
-```text
-API listening
-Routes mapped
-```
-
-keep:
-
-```toml
-[start]
-cmd = "npm run start"
-```
-
-for now. Don't switch to `npm run start:prod` until we've confirmed the build creates `dist/main.js`.
 
 Also, **don't manually delete `node_modules` and commit it**. It should remain in `.gitignore`.
 
