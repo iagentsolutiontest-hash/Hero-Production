@@ -18,30 +18,26 @@ export class MembershipService {
   async resolve(userId: string, organizationId: string): Promise<ResolvedMembership | null> {
     const pool = getPool();
     const result = await pool.query(
-      `SELECT m.id AS membership_id, m.role_id, r.name AS role_name
+      `SELECT m.id AS membership_id, m.role_id, r.name AS role_name,
+              COALESCE(array_agg(p.key) FILTER (WHERE p.key IS NOT NULL), ARRAY[]::text[]) AS permission_keys
        FROM memberships m
        JOIN roles r ON r.id = m.role_id
-       WHERE m.user_id = $1 AND m.organization_id = $2 AND m.is_active = TRUE`,
+       LEFT JOIN role_permissions rp ON rp.role_id = r.id
+       LEFT JOIN permissions p ON p.id = rp.permission_id
+       WHERE m.user_id = $1 AND m.organization_id = $2 AND m.is_active = TRUE
+       GROUP BY m.id, m.role_id, r.name`,
       [userId, organizationId],
     );
 
     if (result.rows.length === 0) return null;
     const row = result.rows[0];
-
-    const permsResult = await pool.query(
-      `SELECT p.key FROM role_permissions rp
-       JOIN permissions p ON p.id = rp.permission_id
-       WHERE rp.role_id = $1`,
-      [row.role_id],
-    );
-
     return {
       membershipId: row.membership_id,
       userId,
       organizationId,
       roleId: row.role_id,
       roleName: row.role_name,
-      permissionKeys: new Set(permsResult.rows.map((r) => r.key)),
+      permissionKeys: new Set<string>(row.permission_keys),
     };
   }
 
@@ -56,7 +52,8 @@ export class MembershipService {
       try {
         await client.query('BEGIN');
         const orgResult = await client.query(
-          `INSERT INTO organizations (name, country_code) VALUES ($1, $2) RETURNING id`,
+          `INSERT INTO organizations (name, country_code, subscription_status, trial_started_at, trial_ends_at)
+           VALUES ($1, $2, 'trialing', now(), now() + INTERVAL '3 days') RETURNING id`,
           [orgName, countryCode],
         );
         const organizationId = orgResult.rows[0].id;

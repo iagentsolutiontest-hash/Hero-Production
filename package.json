@@ -3,12 +3,6 @@
   "version": "1.0.0",
   "description": "Hero accounting platform — NestJS + PostgreSQL API (Phase 1)",
   "private": true,
-
-  "engines": {
-    "node": ">=22.12.0",
-    "npm": ">=10"
-  },
-
   "scripts": {
     "start": "ts-node --transpile-only src/main.ts",
     "start:dev": "ts-node --transpile-only --watch src/main.ts",
@@ -16,13 +10,11 @@
     "migrate": "ts-node --transpile-only src/db/migrate.ts",
     "seed": "ts-node --transpile-only src/db/seed/systemRolesAndPermissions.ts",
     "test": "jest --config jest.config.js",
-    "start:prod": "node dist/src/main.js"
+    "start:prod": "node dist/main.js"
   },
-
   "keywords": [],
   "author": "",
   "license": "ISC",
-
   "dependencies": {
     "@google/genai": "^1.0.0",
     "@nestjs/common": "^11.2.1",
@@ -43,7 +35,6 @@
     "uuid": "^14.0.2",
     "stripe": "^17.5.0"
   },
-
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.1.0",

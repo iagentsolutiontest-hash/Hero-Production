@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 coverage/
+
+# Local document fallback storage
+storage/

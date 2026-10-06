@@ -34,6 +34,10 @@ import { OperationsController } from './modules/operations/operations.controller
 import { OperationsService } from './modules/operations/operations.service';
 import { AiController } from './modules/ai/ai.controller';
 import { AiService } from './modules/ai/ai.service';
+import { BillingController } from './modules/billing/billing.controller';
+import { BillingService } from './modules/billing/billing.service';
+import { DocumentsController } from './modules/files/documents.controller';
+import { DocumentsService } from './modules/files/documents.service';
 
 @Module({
   controllers: [
@@ -53,6 +57,8 @@ import { AiService } from './modules/ai/ai.service';
     PayrollController,
     OperationsController,
     AiController,
+    BillingController,
+    DocumentsController,
   ],
   providers: [
     AuthService,
@@ -73,6 +79,8 @@ import { AiService } from './modules/ai/ai.service';
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     OperationsService,
     AiService,
+    BillingService,
+    DocumentsService,
   ],
 })
 export class AppModule implements NestModule {

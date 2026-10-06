@@ -44,6 +44,60 @@ export class StripeService {
     return Boolean(process.env.STRIPE_SECRET_KEY);
   }
 
+  async createSubscriptionCheckoutSession(
+    organizationId: string,
+    successUrl: string,
+    cancelUrl: string,
+  ): Promise<{ sessionId: string; url: string | null }> {
+    const stripe = this.getStripe();
+    const priceId = process.env.STRIPE_PRICE_ID;
+    if (!priceId) throw new BadRequestException('Stripe subscription price is not configured. Set STRIPE_PRICE_ID.');
+
+    const pool = getPool();
+    const result = await pool.query(
+      `SELECT o.id, o.name, o.stripe_customer_id, u.email
+       FROM organizations o
+       JOIN memberships m ON m.organization_id = o.id AND m.is_active = TRUE
+       JOIN users u ON u.id = m.user_id
+       WHERE o.id = $1
+       ORDER BY CASE WHEN EXISTS (
+         SELECT 1 FROM roles rr WHERE rr.id = m.role_id AND rr.name = 'Owner'
+       ) THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [organizationId],
+    );
+    if (result.rows.length === 0) throw new NotFoundException('Organization not found');
+    const row = result.rows[0];
+
+    let customerId = row.stripe_customer_id as string | null;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        name: row.name,
+        email: row.email || undefined,
+        metadata: { organizationId },
+      });
+      customerId = customer.id;
+      await pool.query(
+        `UPDATE organizations SET stripe_customer_id = $1 WHERE id = $2`,
+        [customerId, organizationId],
+      );
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      allow_promotion_codes: true,
+      client_reference_id: organizationId,
+      metadata: { organizationId },
+      subscription_data: { metadata: { organizationId } },
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    });
+
+    return { sessionId: session.id, url: session.url };
+  }
+
   /**
    * Create a Stripe Checkout Session for the outstanding balance of an invoice.
    * Returns the hosted payment URL for the customer.
@@ -158,14 +212,74 @@ export class StripeService {
       );
     }
 
+    const eventInsert = await getPool().query(
+      `INSERT INTO stripe_webhook_events (stripe_event_id, event_type)
+       VALUES ($1, $2) ON CONFLICT (stripe_event_id) DO NOTHING RETURNING id`,
+      [event.id, event.type],
+    );
+    if (eventInsert.rows.length === 0) return { received: true };
+
     if (event.type === 'checkout.session.completed') {
       await this.onCheckoutCompleted(event.data.object);
+      await this.onSubscriptionCheckoutCompleted(event.data.object);
     } else if (event.type === 'checkout.session.expired') {
       await this.onCheckoutExpired(event.data.object);
+    } else if (event.type === 'customer.subscription.created' || event.type === 'customer.subscription.updated') {
+      await this.onSubscriptionChanged(event.data.object);
+    } else if (event.type === 'customer.subscription.deleted') {
+      await this.onSubscriptionDeleted(event.data.object);
+    } else if (event.type === 'invoice.payment_failed') {
+      await this.onSubscriptionPaymentFailed(event.data.object);
+    } else if (event.type === 'invoice.paid') {
+      await this.onSubscriptionInvoicePaid(event.data.object);
     }
 
     return { received: true };
     });
+  }
+
+  private async onSubscriptionCheckoutCompleted(session: { mode?: string; subscription?: string | { id: string } | null; metadata?: { organizationId?: string } }): Promise<void> {
+    if (session.mode !== 'subscription' || !session.metadata?.organizationId) return;
+    const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+    await getPool().query(
+      `UPDATE organizations SET subscription_status = 'active', stripe_subscription_id = COALESCE($1, stripe_subscription_id), stripe_price_id = $2 WHERE id = $3`,
+      [subscriptionId ?? null, process.env.STRIPE_PRICE_ID ?? null, session.metadata.organizationId],
+    );
+  }
+
+  private async onSubscriptionChanged(subscription: { id: string; customer?: string | { id: string }; status?: string; current_period_end?: number }): Promise<void> {
+    const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id;
+    if (!customerId) return;
+    const status = subscription.status === 'active' ? 'active' : subscription.status === 'past_due' ? 'past_due' : subscription.status === 'canceled' ? 'cancelled' : 'active';
+    await getPool().query(
+      `UPDATE organizations
+       SET subscription_status = $1, stripe_subscription_id = $2,
+           stripe_price_id = COALESCE($3, stripe_price_id),
+           subscription_current_period_end = CASE WHEN $4::bigint IS NULL THEN subscription_current_period_end ELSE to_timestamp($4::double precision) END
+       WHERE stripe_customer_id = $5`,
+      [status, subscription.id, process.env.STRIPE_PRICE_ID ?? null, subscription.current_period_end ?? null, customerId],
+    );
+  }
+
+  private async onSubscriptionDeleted(subscription: { id: string; customer?: string | { id: string } }): Promise<void> {
+    const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id;
+    if (!customerId) return;
+    await getPool().query(
+      `UPDATE organizations SET subscription_status = 'cancelled', stripe_subscription_id = NULL WHERE stripe_customer_id = $1 AND stripe_subscription_id = $2`,
+      [customerId, subscription.id],
+    );
+  }
+
+  private async onSubscriptionPaymentFailed(invoice: { customer?: string | { id: string } }): Promise<void> {
+    const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+    if (!customerId) return;
+    await getPool().query(`UPDATE organizations SET subscription_status = 'past_due' WHERE stripe_customer_id = $1`, [customerId]);
+  }
+
+  private async onSubscriptionInvoicePaid(invoice: { customer?: string | { id: string } }): Promise<void> {
+    const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+    if (!customerId) return;
+    await getPool().query(`UPDATE organizations SET subscription_status = 'active' WHERE stripe_customer_id = $1`, [customerId]);
   }
 
   private async onCheckoutCompleted(session: any): Promise<void> {

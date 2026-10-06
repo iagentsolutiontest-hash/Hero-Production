@@ -16,8 +16,11 @@ Configure `DATABASE_URL` with the Supabase direct connection or session-mode
 pooler. The API sets tenant context on each pooled Postgres session, so do not
 use transaction-mode pooling.
 
-Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET`
-for private file uploads. Keep the service-role key only in Railway.
+File records are available through the operations API, but this version does
+not implement binary upload/download endpoints or connect these values to
+Supabase Storage. Do not rely on file attachments until that API is added.
+If storage support is implemented later, keep any service-role key only in
+Railway.
 
 Set `CORS_ORIGINS` in Railway to the comma-separated Vercel production origin(s), for
 example `https://your-app.vercel.app,https://app.yourdomain.com`. Production

@@ -3,7 +3,7 @@ import { IsString, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MembershipService } from '../tenancy/membership.service';
 import { ChartOfAccountsService } from '../ledger/chart-of-accounts.service';
-import { getPool, withRlsBypass } from '../../db/pool';
+import { withRlsBypass } from '../../db/pool';
 
 class CreateOrganizationDto {
   @IsString()
@@ -35,7 +35,7 @@ export class OrganizationsController {
     await withRlsBypass(async () => {
       await this.chartOfAccountsService.bootstrapStandardAccounts(organizationId);
     });
-    return { success: true, data: { organizationId } };
+    return { success: true, data: { organizationId, trialDays: 3 } };
   }
 
   @Get('mine')

@@ -5,16 +5,12 @@ The NestJS API is intended to run as a persistent Node.js service (Railway, Rend
 ## Build
 
 ```bash
-npm install --include=dev --no-audit --no-fund --cache /tmp/npm-cache
+npm ci
 npm run build
 npm run migrate
 npm run seed
-NODE_ENV=production npm run start:prod
+npm run start:prod
 ```
-
-Use `--include=dev` during the build so npm installs the TypeScript compiler even when the host sets production-only npm configuration. `npm install` avoids `npm ci`'s removal of the existing `node_modules` tree, which can fail in cached build environments when `node_modules/.cache` is locked. The `&&` in Railway's build command ensures compilation does not run after an install failure.
-
-Keep `NODE_ENV=production` for the runtime start command.
 
 Run migrations and seed only against the intended production database and after reviewing the migration/seed behavior.
 

@@ -46,6 +46,13 @@ model Organization {
   name      String
   countryCode String @default("AU") // ISO 3166-1 alpha-2; drives CountryAccountingProvider selection
   isActive  Boolean  @default(true)
+  subscriptionStatus String @default("trialing")
+  trialStartedAt DateTime?
+  trialEndsAt DateTime?
+  stripeCustomerId String? @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId String?
+  subscriptionCurrentPeriodEnd DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -61,6 +68,7 @@ model Organization {
   bankTransactions BankTransaction[]
   payments    Payment[]
   auditLogs   AuditLog[]
+  documents   FileDocument[]
 
   @@map("organizations")
 }
@@ -446,4 +454,23 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@map("audit_logs")
+}
+
+
+model FileDocument {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  mimeType       String?
+  storageKey     String?
+  sizeBytes      BigInt?
+  entityType     String?
+  entityId       String?
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("files_documents")
 }

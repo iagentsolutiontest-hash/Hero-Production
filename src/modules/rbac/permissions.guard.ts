@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { MembershipService } from '../tenancy/membership.service';
 import { PERMISSION_KEY } from './require-permission.decorator';
 import { setTenantOrganizationId } from '../../db/tenant-context';
+import { BillingService } from '../billing/billing.service';
 
 /**
  * Runs AFTER JwtAuthGuard (which sets request.userId). Resolves the
@@ -27,6 +28,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private reflector: Reflector,
     private membershipService: MembershipService,
+    private billingService: BillingService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -53,6 +55,10 @@ export class PermissionsGuard implements CanActivate {
 
     request.membership = membership;
     setTenantOrganizationId(membership.organizationId);
+
+    // All normal tenant application APIs require an active trial or subscription.
+    // Billing endpoints intentionally use JwtAuthGuard only so expired users can pay.
+    await this.billingService.assertActive(membership.organizationId);
 
     const requiredPermission = this.reflector.get<string | undefined>(
       PERMISSION_KEY,

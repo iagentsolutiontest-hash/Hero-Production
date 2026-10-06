@@ -6,27 +6,13 @@ let patched = false;
 
 async function applyTenantGucs(client: PoolClient): Promise<void> {
   const store = getTenantStore();
-  if (store?.bypassRls) {
-    await client.query(`SELECT set_config('app.bypass_rls', 'on', false)`);
-  } else {
-    await client.query(`SELECT set_config('app.bypass_rls', 'off', false)`);
-  }
-  await client.query(`SELECT set_config('app.current_user_id', $1, false)`, [
-    store?.userId || '',
-  ]);
-  await client.query(`SELECT set_config('app.current_organization_id', $1, false)`, [
-    store?.organizationId || '',
-  ]);
-}
-
-async function clearTenantGucs(client: PoolClient): Promise<void> {
-  try {
-    await client.query(`SELECT set_config('app.bypass_rls', 'off', false)`);
-    await client.query(`SELECT set_config('app.current_user_id', '', false)`);
-    await client.query(`SELECT set_config('app.current_organization_id', '', false)`);
-  } catch {
-    // connection may already be broken
-  }
+  await client.query(
+    `SELECT
+       set_config('app.bypass_rls', $1, false),
+       set_config('app.current_user_id', $2, false),
+       set_config('app.current_organization_id', $3, false)`,
+    [store?.bypassRls ? 'on' : 'off', store?.userId || '', store?.organizationId || ''],
+  );
 }
 
 function patchPool(p: Pool): void {
@@ -46,9 +32,9 @@ function patchPool(p: Pool): void {
         return origRelease(err as any);
       }
       released = true;
-      clearTenantGucs(client)
-        .catch(() => undefined)
-        .finally(() => origRelease(err as any));
+      // The next checkout always overwrites all tenant GUCs in one query.
+      // Avoid an extra network round-trip here; this materially reduces API latency.
+      origRelease(err as any);
     };
     return client;
   }) as typeof p.connect;
@@ -86,7 +72,13 @@ export function getPool(): Pool {
       );
     }
 
-    pool = new Pool({ connectionString });
+    pool = new Pool({
+      connectionString,
+      max: Number(process.env.DB_POOL_MAX || 20),
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30_000),
+      connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS || 2_000),
+      statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15_000),
+    });
     patchPool(pool);
   }
   return pool;
