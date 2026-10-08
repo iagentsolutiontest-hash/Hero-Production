@@ -45,6 +45,11 @@ export class MembershipService {
     userId: string,
     orgName: string,
     countryCode: string,
+    plan: 'trial' | 'monthly' = 'trial',
+    baseCurrency?: string,
+    taxStandardRate?: number,
+    taxFreeRate?: number,
+    taxInputRate?: number,
   ): Promise<{ organizationId: string }> {
     return withRlsBypass(async () => {
       const pool = getPool();
@@ -59,9 +64,15 @@ export class MembershipService {
           throw new ConflictException('This user already has an active company. One active company per user is supported.');
         }
         const orgResult = await client.query(
-          `INSERT INTO organizations (name, country_code, subscription_status, trial_started_at, trial_ends_at)
-           VALUES ($1, $2, 'trialing', now(), now() + INTERVAL '3 days') RETURNING id`,
-          [orgName, countryCode],
+          `INSERT INTO organizations
+           (name, country_code, base_currency, tax_standard_rate, tax_free_rate, tax_input_rate,
+            subscription_status, trial_started_at, trial_ends_at)
+           VALUES ($1, $2, COALESCE(NULLIF($3, ''), CASE $2 WHEN 'AU' THEN 'AUD' WHEN 'GB' THEN 'GBP' WHEN 'US' THEN 'USD' WHEN 'CA' THEN 'CAD' WHEN 'IN' THEN 'INR' WHEN 'NZ' THEN 'NZD' WHEN 'PK' THEN 'PKR' ELSE 'AUD' END), $4, $5, $6,
+                   CASE WHEN $7 = 'trial' THEN 'trialing' ELSE 'expired' END,
+                   CASE WHEN $7 = 'trial' THEN now() ELSE NULL END,
+                   CASE WHEN $7 = 'trial' THEN now() + INTERVAL '3 days' ELSE now() END)
+           RETURNING id`,
+          [orgName, countryCode, baseCurrency || '', taxStandardRate ?? null, taxFreeRate ?? null, taxInputRate ?? null, plan],
         );
         const organizationId = orgResult.rows[0].id;
 
@@ -79,10 +90,13 @@ export class MembershipService {
           [userId, organizationId, ownerRole.rows[0].id],
         );
 
+        const welcomeMessage = plan === 'trial'
+          ? 'Your company is ready. Your 3-day trial has started.'
+          : 'Your company is ready. Complete the $50/month payment to activate full access.';
         await client.query(
           `INSERT INTO notifications (organization_id, user_id, title, message, type)
-           VALUES ($1, $2, 'Welcome to Hero Accounting', 'Your company is ready. Your 3-day trial has started.', 'INFO')`,
-          [organizationId, userId],
+           VALUES ($1, $2, 'Welcome to Hero Accounting', $3, 'INFO')`,
+          [organizationId, userId, welcomeMessage],
         );
 
         await client.query('COMMIT');

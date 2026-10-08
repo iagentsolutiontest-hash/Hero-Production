@@ -74,7 +74,7 @@ export class BillingService {
     const trialActive = status === 'trialing' && row.trial_ends_at && new Date(row.trial_ends_at).getTime() > Date.now();
     if (status === 'active' || trialActive) return;
     if (status === 'past_due') throw new HttpException('Your Hero Accounting subscription needs payment attention.', HttpStatus.PAYMENT_REQUIRED);
-    throw new HttpException(`Your 3-day Hero Accounting trial has ended. Please activate your ${this.currency} ${this.price}/month subscription to continue.`, HttpStatus.PAYMENT_REQUIRED);
+    throw new HttpException(row.trial_ends_at ? `Your 3-day Hero Accounting trial has ended. Please activate your ${this.currency} ${this.price}/month subscription to continue.` : `Payment is required to activate your ${this.currency} ${this.price}/month Hero Accounting subscription.`, HttpStatus.PAYMENT_REQUIRED);
   }
 
   async createPortalSession(userId: string, organizationId: string, returnUrl: string): Promise<{ url: string }> {

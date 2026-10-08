@@ -4,6 +4,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { CountryProviderRegistry } from '../country/country-provider.registry';
 import { fromCents, toCents } from '../../common/money';
 import { getInvoiceBalance } from '../payments/balance.util';
+import { getOrganizationAccountingSettings } from '../country/tax-settings';
 
 export interface CreateInvoiceLineInput {
   description: string;
@@ -34,8 +35,10 @@ export class InvoiceService {
     }
 
     const provider = this.countryProviderRegistry.get(countryCode);
+    const accountingSettings = await getOrganizationAccountingSettings(getPool(), organizationId, provider);
+    const taxRates = accountingSettings.taxRates;
     if (!input.currency) {
-      input.currency = provider.defaultCurrency;
+      input.currency = accountingSettings.baseCurrency;
     }
     let subtotalCents = 0n;
     let taxCents = 0n;
@@ -44,11 +47,15 @@ export class InvoiceService {
       const unitCents = toCents(line.unitPrice);
       // lineNet = quantity * unitPrice, computed via cents*cents/100 to stay in integer domain
       const lineNetCents = (qtyCents * unitCents) / 100n;
-      const taxResult = provider.calculateTax({
-        amount: fromCents(lineNetCents),
+      const taxRate = taxRates.find((r) => r.code === line.taxRateCode)?.rate ?? '0';
+      const rate = Number(taxRate);
+      const taxAmount = fromCents((lineNetCents * BigInt(Math.round(rate * 1000000))) / 1000000n);
+      const taxResult = {
+        taxAmount,
+        netAmount: fromCents(lineNetCents),
+        grossAmount: fromCents(lineNetCents + toCents(taxAmount)),
         taxRateCode: line.taxRateCode,
-        isTaxInclusive: false,
-      });
+      };
       const lineTaxCents = toCents(taxResult.taxAmount);
       subtotalCents += lineNetCents;
       taxCents += lineTaxCents;
@@ -103,7 +110,7 @@ export class InvoiceService {
             line.description,
             line.quantity,
             line.unitPrice,
-            provider.taxRates().find((r) => r.code === line.taxRateCode)?.rate ?? '0',
+            taxRates.find((r) => r.code === line.taxRateCode)?.rate ?? '0',
             line.lineTotal,
           ],
         );
@@ -355,7 +362,7 @@ export class InvoiceService {
     }
     const src = inv.rows[0];
     const provider = this.countryProviderRegistry.get(countryCode);
-    const rates = provider.taxRates();
+    const rates = (await getOrganizationAccountingSettings(getPool(), organizationId, provider)).taxRates;
     const today = new Date();
     const due = new Date(today.getTime() + 14 * 86400000);
     return this.create(organizationId, countryCode, {

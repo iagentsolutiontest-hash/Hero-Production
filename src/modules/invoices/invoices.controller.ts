@@ -62,7 +62,7 @@ export class InvoicesController {
   async create(@Req() req: any, @Body() dto: CreateInvoiceDto) {
     const pool = getPool();
     const orgResult = await pool.query(
-      `SELECT country_code FROM organizations WHERE id = $1`,
+      `SELECT country_code, base_currency FROM organizations WHERE id = $1`,
       [req.membership.organizationId],
     );
     const countryCode = orgResult.rows[0]?.country_code ?? 'AU';
@@ -71,7 +71,7 @@ export class InvoicesController {
       contactId: dto.contactId,
       issueDate: new Date(dto.issueDate),
       dueDate: new Date(dto.dueDate),
-      currency: dto.currency ?? '',
+      currency: dto.currency ?? orgResult.rows[0]?.base_currency ?? '',
       lines: dto.lines,
       notes: dto.notes,
     });
@@ -161,7 +161,7 @@ export class InvoicesController {
   @RequirePermission('invoice.create')
   async duplicate(@Req() req: any, @Param('id') id: string) {
     const pool = getPool();
-    const orgResult = await pool.query(`SELECT country_code FROM organizations WHERE id = $1`, [
+    const orgResult = await pool.query(`SELECT country_code, base_currency FROM organizations WHERE id = $1`, [
       req.membership.organizationId,
     ]);
     const countryCode = orgResult.rows[0]?.country_code ?? 'AU';

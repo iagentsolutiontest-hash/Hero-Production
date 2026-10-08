@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Patch, Post, Req, UseGuards, BadRequestException } from '@nestjs/common';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsNumber } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MembershipService } from '../tenancy/membership.service';
 import { ChartOfAccountsService } from '../ledger/chart-of-accounts.service';
@@ -14,6 +14,26 @@ class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   countryCode?: string;
+
+  @IsOptional()
+  @IsIn(['trial', 'monthly'])
+  plan?: 'trial' | 'monthly';
+
+  @IsOptional()
+  @IsString()
+  baseCurrency?: string;
+
+  @IsOptional()
+  @IsNumber()
+  taxStandardRate?: number;
+
+  @IsOptional()
+  @IsNumber()
+  taxFreeRate?: number;
+
+  @IsOptional()
+  @IsNumber()
+  taxInputRate?: number;
 }
 
 @Controller('api/v1/organizations')
@@ -30,6 +50,11 @@ export class OrganizationsController {
       req.userId,
       dto.name,
       dto.countryCode ?? 'AU',
+      dto.plan ?? 'trial',
+      dto.baseCurrency,
+      dto.taxStandardRate,
+      dto.taxFreeRate,
+      dto.taxInputRate,
     );
     // Every new org gets a standard chart of accounts immediately — you
     // can't post an invoice without accounts to post it against.
@@ -37,7 +62,7 @@ export class OrganizationsController {
     await withRlsBypass(async () => {
       await this.chartOfAccountsService.bootstrapStandardAccounts(organizationId);
     });
-    return { success: true, data: { organizationId, trialDays: 3 } };
+    return { success: true, data: { organizationId, trialDays: dto.plan === 'trial' ? 3 : 0, plan: dto.plan ?? 'trial' } };
   }
 
   @Patch('current')
@@ -48,9 +73,17 @@ export class OrganizationsController {
     if (!countryCode) throw new BadRequestException('Country is required');
     const pool = getPool();
     const result = await pool.query(
-      `UPDATE organizations SET name = COALESCE(NULLIF($1, ''), name), country_code = $2, updated_at = now()
-       WHERE id = $3 AND is_active = TRUE RETURNING id, name, country_code`,
-      [dto.name?.trim() || '', countryCode, req.membership.organizationId],
+      `UPDATE organizations SET
+         name = COALESCE(NULLIF($1, ''), name),
+         country_code = $2,
+         base_currency = COALESCE(NULLIF($4, ''), base_currency),
+         tax_standard_rate = $5,
+         tax_free_rate = $6,
+         tax_input_rate = $7,
+         updated_at = now()
+       WHERE id = $3 AND is_active = TRUE
+       RETURNING id, name, country_code, base_currency, tax_standard_rate, tax_free_rate, tax_input_rate`,
+      [dto.name?.trim() || '', countryCode, req.membership.organizationId, dto.baseCurrency?.trim()?.toUpperCase() || null, dto.taxStandardRate ?? null, dto.taxFreeRate ?? null, dto.taxInputRate ?? null],
     );
     if (!result.rows.length) throw new BadRequestException('Organization not found');
     return { success: true, data: result.rows[0] };

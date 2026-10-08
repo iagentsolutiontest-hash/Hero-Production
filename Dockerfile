@@ -8,6 +8,7 @@ RUN npm install --include=dev
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY migrations ./migrations
 
 RUN npm run build
 

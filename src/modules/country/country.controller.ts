@@ -4,6 +4,7 @@ import { PermissionsGuard } from '../rbac/permissions.guard';
 import { RequirePermission } from '../rbac/require-permission.decorator';
 import { CountryProviderRegistry } from './country-provider.registry';
 import { getPool } from '../../db/pool';
+import { getOrganizationAccountingSettings } from './tax-settings';
 
 @Controller('api/v1/countries')
 export class CountryController {
@@ -29,13 +30,14 @@ export class CountryController {
     }
     const code = org.rows[0].country_code || 'AU';
     const provider = this.registry.get(code);
+    const settings = await getOrganizationAccountingSettings(pool, req.membership.organizationId, provider);
     return {
       success: true,
       data: {
         countryCode: provider.countryCode,
         registrationIdLabel: provider.registrationIdLabel,
-        defaultCurrency: provider.defaultCurrency,
-        taxRates: provider.taxRates(),
+        defaultCurrency: settings.baseCurrency,
+        taxRates: settings.taxRates,
       },
     };
   }
